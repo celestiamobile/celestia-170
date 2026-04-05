@@ -195,6 +195,12 @@ jobs:
         if ${{matrix.platform}}==x86 set ISCCExtraFlags=/DBuildX86Installer
         iscc ${{github.workspace}}\installer\celestia.iss /O${{github.workspace}}\installer /FCelestiaInstaller %ISCCExtraFlags%
 
+    - name: Rename installer
+      shell: pwsh
+      run: |
+        Rename-Item -Path "${{github.workspace}}/installer/CelestiaInstaller.exe" `
+                    -NewName "CelestiaInstaller-${{matrix.platform}}.exe"
+
     - name: Upload installer
       uses: actions/upload-artifact@v5
       if: success()
@@ -202,4 +208,40 @@ jobs:
         name: celestia-installer-${{matrix.platform}}
         if-no-files-found: error
         path: |
-          ${{github.workspace}}/installer/CelestiaInstaller.exe
+          ${{github.workspace}}/installer/CelestiaInstaller-${{matrix.platform}}.exe
+
+  release:
+    name: "Create Release"
+    needs: build-installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download all installer artifacts
+      uses: actions/download-artifact@v5
+      with:
+        path: artifacts
+
+    - name: Delete existing latest release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release delete latest --repo ${{ github.repository }} --yes --cleanup-tag 2>/dev/null || true
+
+    - name: Create rolling prerelease
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create latest \
+          --repo ${{ github.repository }} \
+          --title "Latest Build" \
+          --notes "Rolling pre-release built from CelestiaProject/Celestia master.
+
+        Built on $(date -u '+%Y-%m-%d %H:%M UTC')
+        Celestia commit: $(cd artifacts && echo 'see workflow run for details')" \
+          --prerelease \
+          artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe \
+          artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe
