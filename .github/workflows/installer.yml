@@ -1,0 +1,205 @@
+name: Build Installer
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: RelWithDebInfo
+  VCPKG_BINARY_SOURCES: 'clear;nuget,GitHub,readwrite'
+
+jobs:
+  build-installer:
+    name: "installer-${{matrix.platform}}"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ x64 ]
+
+    steps:
+    - name: Checkout installer repo
+      uses: actions/checkout@v6
+
+    - name: Checkout Celestia source
+      uses: actions/checkout@v6
+      with:
+        repository: CelestiaProject/Celestia
+        path: 'celestia'
+        submodules: true
+
+    - name: Checkout CelestiaContent
+      uses: actions/checkout@v6
+      with:
+        repository: CelestiaProject/CelestiaContent
+        path: 'content'
+
+    - name: Update vcpkg
+      shell: pwsh
+      run: |
+        $vcpkgCommit = 'c3867e714dd3a51c272826eea77267876517ed99'
+        pushd "$env:VCPKG_INSTALLATION_ROOT"
+        git fetch origin $vcpkgCommit
+        git reset --hard $vcpkgCommit
+        ./bootstrap-vcpkg.bat
+        ./vcpkg.exe integrate install
+        popd
+
+    - name: Setup NuGet Credentials
+      shell: pwsh
+      run: |
+        $nugetCmd = vcpkg fetch nuget | Select-Object -Last 1
+        $nugetSource = 'https://nuget.pkg.github.com/CelestiaProject/index.json'
+        & "$nugetCmd" sources add `
+          -Source "$nugetSource" `
+          -StorePasswordInClearText `
+          -Name "GitHub" `
+          -Username 'CelestiaProject' `
+          -Password '${{secrets.GITHUB_TOKEN}}'
+
+    - name: Install dependencies
+      shell: pwsh
+      run: |
+        $packages = @(
+          'boost-container',
+          'boost-container-hash',
+          'boost-smart-ptr',
+          'eigen3',
+          'ffmpeg[core,avcodec,avformat,gpl,swscale,x264]',
+          'fmt',
+          'freetype',
+          'gettext[tools]',
+          'gperf',
+          'libepoxy',
+          'libjpeg-turbo',
+          'libpng',
+          'luajit',
+          'qtbase[core,opengl,widgets,freetype,harfbuzz,jpeg,png]'
+        )
+
+        if ( '${{matrix.platform}}' -eq 'x86' ) {
+          $hostTriplet = 'x86-windows-release'
+        } else {
+          $hostTriplet = 'x64-windows-release'
+        }
+
+        pushd "$env:VCPKG_INSTALLATION_ROOT"
+        ./vcpkg.exe --overlay-triplets=${{github.workspace}}/celestia/windows/vcpkg-triplets `
+                    --triplet=${{matrix.platform}}-windows-release `
+                    --host-triplet=$hostTriplet `
+                    install --recurse @packages
+        popd
+
+    - name: Find ImageMagick
+      shell: pwsh
+      run: |
+        $magickDir = (Get-ChildItem "C:\Program Files\ImageMagick*" -Directory | Select-Object -First 1).FullName
+        echo "ImageMagick dir: $magickDir"
+        echo "$magickDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "ImageMagick_HOME=$magickDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: Configure CMake
+      shell: pwsh
+      run: |
+        if ( '${{matrix.platform}}' -eq 'x86' ) {
+            $GeneratorPlatform = 'Win32'
+        } else {
+            $GeneratorPlatform = '${{matrix.platform}}'
+        }
+
+        cmake -B '${{github.workspace}}/build' `
+            -S '${{github.workspace}}/celestia' `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_OVERLAY_TRIPLETS="${{github.workspace}}/celestia/windows/vcpkg-triplets" `
+            -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows-release `
+            -DCMAKE_GENERATOR_PLATFORM="$GeneratorPlatform" `
+            -DCMAKE_INSTALL_PREFIX="${{github.workspace}}/install" `
+            -DENABLE_SPICE=OFF    `
+            -DENABLE_TOOLS=ON     `
+            -DENABLE_TESTS=ON     `
+            -DENABLE_SDL=OFF      `
+            -DENABLE_QT5=OFF      `
+            -DENABLE_WIN=ON       `
+            -DENABLE_QT6=ON       `
+            -DENABLE_FFMPEG=ON    `
+            -DENABLE_MINIAUDIO=ON `
+            -DENABLE_LTO=ON       `
+            -DUSE_ICU=ON          `
+            -DUSE_WIN_ICU=ON
+
+    - name: Build
+      shell: pwsh
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} '--' /maxcpucount:2 /nologo
+
+    - name: Test
+      shell: pwsh
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{env.BUILD_TYPE}}
+
+    - name: Prepare installer directory
+      shell: pwsh
+      run: |
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component core
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component wingui
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component qt6gui
+        Rename-Item -Path "install" -NewName "installer"
+
+    - name: Install CelestiaContent
+      shell: pwsh
+      run: |
+        cmake -S ${{github.workspace}}/content -B ${{github.workspace}}/content/build `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_OVERLAY_TRIPLETS="${{github.workspace}}/celestia/windows/vcpkg-triplets" `
+            -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows-release `
+            -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer `
+            -DImageMagick_magick_EXECUTABLE="$env:ImageMagick_HOME/magick.exe" `
+            -DImageMagick_convert_EXECUTABLE="$env:ImageMagick_HOME/magick.exe" `
+            -DImageMagick_identify_EXECUTABLE="$env:ImageMagick_HOME/magick.exe"
+        cmake --build ${{github.workspace}}/content/build --config ${{env.BUILD_TYPE}} --target install
+
+    - name: Copy files for installer
+      shell: pwsh
+      run: |
+        Copy-Item celestia.iss ${{github.workspace}}/installer/
+        Copy-Item ${{github.workspace}}/celestia/win32-installer-image.bmp ${{github.workspace}}/installer/
+        Copy-Item ${{github.workspace}}/celestia/AUTHORS ${{github.workspace}}/installer/
+        Copy-Item ${{github.workspace}}/celestia/ChangeLog ${{github.workspace}}/installer/
+        Copy-Item ${{github.workspace}}/celestia/README ${{github.workspace}}/installer/
+        Copy-Item ${{github.workspace}}/celestia/TRANSLATORS ${{github.workspace}}/installer/
+
+    - name: Run windeployqt for installer
+      shell: pwsh
+      run: |
+        $windeployqt = "$env:VCPKG_INSTALLATION_ROOT/installed/${{matrix.platform}}-windows-release/tools/Qt6/bin/windeployqt.exe"
+        & $windeployqt "${{github.workspace}}/installer/celestia-qt6.exe"
+
+    - name: Download VC++ redistributable
+      shell: pwsh
+      run: |
+        if ('${{matrix.platform}}' -eq 'x86') {
+          $url = 'https://aka.ms/vc14/vc_redist.x86.exe'
+        } else {
+          $url = 'https://aka.ms/vc14/vc_redist.x64.exe'
+        }
+        Invoke-WebRequest -Uri $url -OutFile "${{github.workspace}}/installer/vc_redist.exe"
+
+    - name: Create installer
+      shell: cmd
+      run: |
+        set ISCCExtraFlags=/DBuildX64Installer
+        if ${{matrix.platform}}==x86 set ISCCExtraFlags=/DBuildX86Installer
+        iscc ${{github.workspace}}\installer\celestia.iss /O${{github.workspace}}\installer /FCelestiaInstaller %ISCCExtraFlags%
+
+    - name: Upload installer
+      uses: actions/upload-artifact@v5
+      if: success()
+      with:
+        name: celestia-installer-${{matrix.platform}}
+        if-no-files-found: error
+        path: |
+          ${{github.workspace}}/installer/CelestiaInstaller.exe
