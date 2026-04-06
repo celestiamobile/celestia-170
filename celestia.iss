@@ -3,7 +3,10 @@
 
 ; This script was tested with Inno Setup Compiler version 5.1.5
 
-#ifdef BuildX64Installer
+#ifdef BuildArm64Installer
+  #define Arch "arm64"
+  #define ArchitecturesInstallIn64BitModeValue "arm64"
+#elif defined(BuildX64Installer)
   #define Arch "x64"
   #define ArchitecturesInstallIn64BitModeValue "x64"
 #else

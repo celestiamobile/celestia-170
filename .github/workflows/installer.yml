@@ -16,11 +16,17 @@ env:
 jobs:
   build-installer:
     name: "installer-${{matrix.platform}}"
-    runs-on: windows-latest
+    runs-on: ${{matrix.os}}
     strategy:
       fail-fast: false
       matrix:
-        platform: [ x64, x86 ]
+        include:
+          - platform: x64
+            os: windows-latest
+          - platform: x86
+            os: windows-latest
+          - platform: arm64
+            os: windows-11-arm
 
     steps:
     - name: Checkout installer repo
@@ -62,6 +68,48 @@ jobs:
           -Username 'CelestiaProject' `
           -Password '${{secrets.GITHUB_TOKEN}}'
 
+    - name: Find ImageMagick
+      shell: pwsh
+      run: |
+        $magickDir = $null
+        if ('${{matrix.platform}}' -eq 'arm64') {
+          # System ImageMagick on windows-11-arm is x64; download the ARM64 portable build directly
+          $releasePage = Invoke-WebRequest -Uri 'https://imagemagick.org/archive/binaries/' -UseBasicParsing
+          $arm7z = ($releasePage.Links | Where-Object { $_.href -match 'portable-Q16-HDRI-arm64\.7z$' } | Select-Object -Last 1).href
+          if (-not $arm7z) { Write-Error "Could not find ARM64 ImageMagick portable archive"; exit 1 }
+          $archiveUrl = "https://imagemagick.org/archive/binaries/$arm7z"
+          $extractPath = "$env:TEMP\ImageMagick-arm64"
+          Write-Host "Downloading $archiveUrl"
+          Invoke-WebRequest -Uri $archiveUrl -OutFile "$env:TEMP\imagemagick-arm64.7z"
+          & 'C:\Program Files\7-Zip\7z.exe' x "$env:TEMP\imagemagick-arm64.7z" -o"$extractPath" -y
+          $magickDir = $extractPath
+        } else {
+          # Search common install locations
+          foreach ($root in @("C:\Program Files", "C:\Program Files (x86)", "C:\Tools", "C:\ProgramData\chocolatey\lib")) {
+            $found = Get-ChildItem "$root\ImageMagick*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $magickDir = $found.FullName; break }
+          }
+          # Fallback: find magick.exe anywhere via choco shim or PATH
+          if (-not $magickDir) {
+            $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
+            if ($magickExe) { $magickDir = Split-Path $magickExe }
+          }
+          if (-not $magickDir) {
+            Write-Host "ImageMagick not found, installing..."
+            choco install imagemagick -y
+            refreshenv
+            $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
+            if ($magickExe) { $magickDir = Split-Path $magickExe }
+          }
+        }
+        Write-Host "ImageMagick dir: $magickDir"
+        if ($magickDir) {
+          echo "$magickDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "ImageMagick_HOME=$magickDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        } else {
+          Write-Error "Failed to locate ImageMagick"; exit 1
+        }
+
     - name: Install dependencies
       shell: pwsh
       run: |
@@ -84,39 +132,41 @@ jobs:
 
         if ( '${{matrix.platform}}' -eq 'x86' ) {
           $hostTriplet = 'x86-windows-release'
+          $targetTriplet = 'x86-windows-release'
+        } elseif ( '${{matrix.platform}}' -eq 'arm64' ) {
+          $hostTriplet = 'arm64-windows'
+          $targetTriplet = 'arm64-windows'
         } else {
           $hostTriplet = 'x64-windows-release'
+          $targetTriplet = 'x64-windows-release'
         }
 
         pushd "$env:VCPKG_INSTALLATION_ROOT"
         ./vcpkg.exe --overlay-triplets=${{github.workspace}}/celestia/windows/vcpkg-triplets `
-                    --triplet=${{matrix.platform}}-windows-release `
-                    --host-triplet=$hostTriplet `
+                    --triplet="$targetTriplet" `
+                    --host-triplet="$hostTriplet" `
                     install --recurse @packages
         popd
-
-    - name: Find ImageMagick
-      shell: pwsh
-      run: |
-        $magickDir = (Get-ChildItem "C:\Program Files\ImageMagick*" -Directory | Select-Object -First 1).FullName
-        echo "ImageMagick dir: $magickDir"
-        echo "$magickDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        echo "ImageMagick_HOME=$magickDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Configure CMake
       shell: pwsh
       run: |
         if ( '${{matrix.platform}}' -eq 'x86' ) {
             $GeneratorPlatform = 'Win32'
+            $vcpkgTriplet = 'x86-windows-release'
+        } elseif ( '${{matrix.platform}}' -eq 'arm64' ) {
+            $GeneratorPlatform = 'ARM64'
+            $vcpkgTriplet = 'arm64-windows'
         } else {
             $GeneratorPlatform = '${{matrix.platform}}'
+            $vcpkgTriplet = 'x64-windows-release'
         }
 
         cmake -B '${{github.workspace}}/build' `
             -S '${{github.workspace}}/celestia' `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_OVERLAY_TRIPLETS="${{github.workspace}}/celestia/windows/vcpkg-triplets" `
-            -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows-release `
+            -DVCPKG_TARGET_TRIPLET="$vcpkgTriplet" `
             -DCMAKE_GENERATOR_PLATFORM="$GeneratorPlatform" `
             -DCMAKE_INSTALL_PREFIX="${{github.workspace}}/install" `
             -DENABLE_SPICE=OFF    `
@@ -152,10 +202,18 @@ jobs:
     - name: Install CelestiaContent
       shell: pwsh
       run: |
+        if ( '${{matrix.platform}}' -eq 'arm64' ) {
+          $contentTriplet = 'arm64-windows'
+        } elseif ( '${{matrix.platform}}' -eq 'x86' ) {
+          $contentTriplet = 'x86-windows-release'
+        } else {
+          $contentTriplet = 'x64-windows-release'
+        }
+
         cmake -S ${{github.workspace}}/content -B ${{github.workspace}}/content/build `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_OVERLAY_TRIPLETS="${{github.workspace}}/celestia/windows/vcpkg-triplets" `
-            -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows-release `
+            -DVCPKG_TARGET_TRIPLET="$contentTriplet" `
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer `
             -DImageMagick_magick_EXECUTABLE="$env:ImageMagick_HOME/magick.exe" `
             -DImageMagick_convert_EXECUTABLE="$env:ImageMagick_HOME/magick.exe" `
@@ -175,7 +233,14 @@ jobs:
     - name: Run windeployqt for installer
       shell: pwsh
       run: |
-        $windeployqt = "$env:VCPKG_INSTALLATION_ROOT/installed/${{matrix.platform}}-windows-release/tools/Qt6/bin/windeployqt.exe"
+        if ( '${{matrix.platform}}' -eq 'arm64' ) {
+          $tripletDir = 'arm64-windows'
+        } elseif ( '${{matrix.platform}}' -eq 'x86' ) {
+          $tripletDir = 'x86-windows-release'
+        } else {
+          $tripletDir = 'x64-windows-release'
+        }
+        $windeployqt = "$env:VCPKG_INSTALLATION_ROOT/installed/$tripletDir/tools/Qt6/bin/windeployqt.exe"
         & $windeployqt "${{github.workspace}}/installer/celestia-qt6.exe"
 
     - name: Download VC++ redistributable
@@ -183,6 +248,8 @@ jobs:
       run: |
         if ('${{matrix.platform}}' -eq 'x86') {
           $url = 'https://aka.ms/vc14/vc_redist.x86.exe'
+        } elseif ('${{matrix.platform}}' -eq 'arm64') {
+          $url = 'https://aka.ms/vc14/vc_redist.arm64.exe'
         } else {
           $url = 'https://aka.ms/vc14/vc_redist.x64.exe'
         }
@@ -193,6 +260,7 @@ jobs:
       run: |
         set ISCCExtraFlags=/DBuildX64Installer
         if ${{matrix.platform}}==x86 set ISCCExtraFlags=/DBuildX86Installer
+        if ${{matrix.platform}}==arm64 set ISCCExtraFlags=/DBuildArm64Installer
         iscc ${{github.workspace}}\installer\celestia.iss /O${{github.workspace}}\installer /FCelestiaInstaller %ISCCExtraFlags%
 
     - name: Rename installer
@@ -244,4 +312,5 @@ jobs:
         Celestia commit: $(cd artifacts && echo 'see workflow run for details')" \
           --prerelease \
           artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe \
-          artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe
+          artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe \
+          artifacts/celestia-installer-arm64/CelestiaInstaller-arm64.exe
