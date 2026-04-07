@@ -283,6 +283,7 @@ jobs:
   release:
     name: "Create Release"
     needs: build-installer
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -314,5 +315,4 @@ jobs:
         Celestia commit: $(cd artifacts && echo 'see workflow run for details')" \
           --prerelease \
           artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe \
-          artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe \
-          artifacts/celestia-installer-arm64/CelestiaInstaller-arm64.exe
+          artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe
