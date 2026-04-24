@@ -40,6 +40,17 @@ jobs:
         repository: CelestiaProject/Celestia
         path: 'celestia'
         submodules: true
+        fetch-depth: 0
+
+    - name: Merge feature/srgb-support
+      shell: pwsh
+      working-directory: ${{github.workspace}}/celestia
+      run: |
+        git config user.email "ci@celestiamobile.com"
+        git config user.name "Celestia CI"
+        git fetch origin feature/srgb-support
+        git merge origin/feature/srgb-support --no-edit
+        git submodule update --init --recursive
 
     - name: Checkout CelestiaContent
       uses: actions/checkout@v6
