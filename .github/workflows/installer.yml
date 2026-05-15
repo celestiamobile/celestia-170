@@ -27,8 +27,6 @@ jobs:
             os: windows-latest
           - platform: x86
             os: windows-latest
-          - platform: arm64
-            os: windows-11-arm
 
     steps:
     - name: Checkout installer repo
@@ -74,35 +72,22 @@ jobs:
       shell: pwsh
       run: |
         $magickDir = $null
-        if ('${{matrix.platform}}' -eq 'arm64') {
-          # System ImageMagick on windows-11-arm is x64; download the ARM64 portable build directly
-          $releasePage = Invoke-WebRequest -Uri 'https://imagemagick.org/archive/binaries/' -UseBasicParsing
-          $arm7z = ($releasePage.Links | Where-Object { $_.href -match 'portable-Q16-HDRI-arm64\.7z$' } | Select-Object -Last 1).href
-          if (-not $arm7z) { Write-Error "Could not find ARM64 ImageMagick portable archive"; exit 1 }
-          $archiveUrl = "https://imagemagick.org/archive/binaries/$arm7z"
-          $extractPath = "$env:TEMP\ImageMagick-arm64"
-          Write-Host "Downloading $archiveUrl"
-          Invoke-WebRequest -Uri $archiveUrl -OutFile "$env:TEMP\imagemagick-arm64.7z"
-          & 'C:\Program Files\7-Zip\7z.exe' x "$env:TEMP\imagemagick-arm64.7z" -o"$extractPath" -y
-          $magickDir = $extractPath
-        } else {
-          # Search common install locations
-          foreach ($root in @("C:\Program Files", "C:\Program Files (x86)", "C:\Tools", "C:\ProgramData\chocolatey\lib")) {
-            $found = Get-ChildItem "$root\ImageMagick*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) { $magickDir = $found.FullName; break }
-          }
-          # Fallback: find magick.exe anywhere via choco shim or PATH
-          if (-not $magickDir) {
-            $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
-            if ($magickExe) { $magickDir = Split-Path $magickExe }
-          }
-          if (-not $magickDir) {
-            Write-Host "ImageMagick not found, installing..."
-            choco install imagemagick -y
-            refreshenv
-            $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
-            if ($magickExe) { $magickDir = Split-Path $magickExe }
-          }
+        # Search common install locations
+        foreach ($root in @("C:\Program Files", "C:\Program Files (x86)", "C:\Tools", "C:\ProgramData\chocolatey\lib")) {
+          $found = Get-ChildItem "$root\ImageMagick*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($found) { $magickDir = $found.FullName; break }
+        }
+        # Fallback: find magick.exe anywhere via choco shim or PATH
+        if (-not $magickDir) {
+          $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
+          if ($magickExe) { $magickDir = Split-Path $magickExe }
+        }
+        if (-not $magickDir) {
+          Write-Host "ImageMagick not found, installing..."
+          choco install imagemagick -y
+          refreshenv
+          $magickExe = (Get-Command magick -ErrorAction SilentlyContinue).Source
+          if ($magickExe) { $magickDir = Split-Path $magickExe }
         }
         Write-Host "ImageMagick dir: $magickDir"
         if ($magickDir) {
@@ -135,9 +120,6 @@ jobs:
         if ( '${{matrix.platform}}' -eq 'x86' ) {
           $hostTriplet = 'x86-windows-release'
           $targetTriplet = 'x86-windows-release'
-        } elseif ( '${{matrix.platform}}' -eq 'arm64' ) {
-          $hostTriplet = 'arm64-windows'
-          $targetTriplet = 'arm64-windows'
         } else {
           $hostTriplet = 'x64-windows-release'
           $targetTriplet = 'x64-windows-release'
@@ -156,9 +138,6 @@ jobs:
         if ( '${{matrix.platform}}' -eq 'x86' ) {
             $GeneratorPlatform = 'Win32'
             $vcpkgTriplet = 'x86-windows-release'
-        } elseif ( '${{matrix.platform}}' -eq 'arm64' ) {
-            $GeneratorPlatform = 'ARM64'
-            $vcpkgTriplet = 'arm64-windows'
         } else {
             $GeneratorPlatform = '${{matrix.platform}}'
             $vcpkgTriplet = 'x64-windows-release'
@@ -204,9 +183,7 @@ jobs:
     - name: Install CelestiaContent
       shell: pwsh
       run: |
-        if ( '${{matrix.platform}}' -eq 'arm64' ) {
-          $contentTriplet = 'arm64-windows'
-        } elseif ( '${{matrix.platform}}' -eq 'x86' ) {
+        if ( '${{matrix.platform}}' -eq 'x86' ) {
           $contentTriplet = 'x86-windows-release'
         } else {
           $contentTriplet = 'x64-windows-release'
@@ -235,9 +212,7 @@ jobs:
     - name: Run windeployqt for installer
       shell: pwsh
       run: |
-        if ( '${{matrix.platform}}' -eq 'arm64' ) {
-          $tripletDir = 'arm64-windows'
-        } elseif ( '${{matrix.platform}}' -eq 'x86' ) {
+        if ( '${{matrix.platform}}' -eq 'x86' ) {
           $tripletDir = 'x86-windows-release'
         } else {
           $tripletDir = 'x64-windows-release'
@@ -250,8 +225,6 @@ jobs:
       run: |
         if ('${{matrix.platform}}' -eq 'x86') {
           $url = 'https://aka.ms/vc14/vc_redist.x86.exe'
-        } elseif ('${{matrix.platform}}' -eq 'arm64') {
-          $url = 'https://aka.ms/vc14/vc_redist.arm64.exe'
         } else {
           $url = 'https://aka.ms/vc14/vc_redist.x64.exe'
         }
@@ -262,7 +235,6 @@ jobs:
       run: |
         set ISCCExtraFlags=/DBuildX64Installer
         if ${{matrix.platform}}==x86 set ISCCExtraFlags=/DBuildX86Installer
-        if ${{matrix.platform}}==arm64 set ISCCExtraFlags=/DBuildArm64Installer
         iscc ${{github.workspace}}\installer\celestia.iss /O${{github.workspace}}\installer /FCelestiaInstaller %ISCCExtraFlags%
 
     - name: Rename installer
@@ -307,13 +279,22 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        CELESTIA_COMMITS=$(gh api "repos/CelestiaProject/Celestia/commits?per_page=3" \
+          --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/Celestia/commit/\(.sha)) \(.commit.message | split("\n")[0])"')
+        CONTENT_COMMITS=$(gh api "repos/CelestiaProject/CelestiaContent/commits?per_page=3" \
+          --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/CelestiaContent/commit/\(.sha)) \(.commit.message | split("\n")[0])"')
         gh release create latest \
           --repo ${{ github.repository }} \
           --title "Latest Build" \
           --notes "Rolling pre-release built from CelestiaProject/Celestia master.
 
         Built on $(date -u '+%Y-%m-%d %H:%M UTC')
-        Celestia commit: $(cd artifacts && echo 'see workflow run for details')" \
+
+        **Recent Celestia commits:**
+        ${CELESTIA_COMMITS}
+
+        **Recent CelestiaContent commits:**
+        ${CONTENT_COMMITS}" \
           --prerelease \
           artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe \
           artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe
