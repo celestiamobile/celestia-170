@@ -267,26 +267,31 @@ jobs:
       with:
         path: artifacts
 
-    - name: Delete existing latest release
+    - name: Publish rolling prerelease
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gh release delete latest --repo ${{ github.repository }} --yes --cleanup-tag 2>/dev/null || true
+        for attempt in 1 2 3; do
+          if CELESTIA_COMMITS=$(gh api "repos/CelestiaProject/Celestia/commits?per_page=3" \
+            --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/Celestia/commit/\(.sha)) \(.commit.message | split("\n")[0])"'); then
+            break
+          fi
+          [[ $attempt -eq 3 ]] && exit 1
+          sleep $((attempt * 5))
+        done
 
-    - name: Create rolling prerelease
-      shell: bash
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        CELESTIA_COMMITS=$(gh api "repos/CelestiaProject/Celestia/commits?per_page=3" \
-          --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/Celestia/commit/\(.sha)) \(.commit.message | split("\n")[0])"')
-        CONTENT_COMMITS=$(gh api "repos/CelestiaProject/CelestiaContent/commits?per_page=3" \
-          --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/CelestiaContent/commit/\(.sha)) \(.commit.message | split("\n")[0])"')
-        gh release create latest \
-          --repo ${{ github.repository }} \
-          --title "Latest Build" \
-          --notes "Rolling pre-release built from CelestiaProject/Celestia master.
+        for attempt in 1 2 3; do
+          if CONTENT_COMMITS=$(gh api "repos/CelestiaProject/CelestiaContent/commits?per_page=3" \
+            --jq '.[] | "- [`\(.sha[:7])`](https://github.com/CelestiaProject/CelestiaContent/commit/\(.sha)) \(.commit.message | split("\n")[0])"'); then
+            break
+          fi
+          [[ $attempt -eq 3 ]] && exit 1
+          sleep $((attempt * 5))
+        done
+
+        cat > release-notes.md <<EOF
+        Rolling pre-release built from CelestiaProject/Celestia master.
 
         Built on $(date -u '+%Y-%m-%d %H:%M UTC')
 
@@ -294,7 +299,27 @@ jobs:
         ${CELESTIA_COMMITS}
 
         **Recent CelestiaContent commits:**
-        ${CONTENT_COMMITS}" \
-          --prerelease \
-          artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe \
+        ${CONTENT_COMMITS}
+        EOF
+
+        assets=(
+          artifacts/celestia-installer-x64/CelestiaInstaller-x64.exe
           artifacts/celestia-installer-x86/CelestiaInstaller-x86.exe
+        )
+
+        if gh release view latest --repo ${{ github.repository }} >/dev/null 2>&1; then
+          gh release upload latest "${assets[@]}" \
+            --repo ${{ github.repository }} \
+            --clobber
+          gh release edit latest \
+            --repo ${{ github.repository }} \
+            --title "Latest Build" \
+            --notes-file release-notes.md \
+            --prerelease
+        else
+          gh release create latest "${assets[@]}" \
+            --repo ${{ github.repository }} \
+            --title "Latest Build" \
+            --notes-file release-notes.md \
+            --prerelease
+        fi
