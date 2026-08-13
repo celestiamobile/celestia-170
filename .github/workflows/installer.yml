@@ -114,7 +114,7 @@ jobs:
           'libjpeg-turbo',
           'libpng',
           'luajit',
-          'qtbase[core,opengl,widgets,freetype,harfbuzz,jpeg,png]'
+          'qtbase[core,opengl,widgets,freetype,harfbuzz,jpeg,png,windeployqt]'
         )
 
         if ( '${{matrix.platform}}' -eq 'x86' ) {
