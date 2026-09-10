@@ -155,7 +155,7 @@ jobs:
             -DENABLE_TESTS=ON     `
             -DENABLE_SDL=OFF      `
             -DENABLE_QT5=OFF      `
-            -DENABLE_WIN=ON       `
+            -DENABLE_WIN=OFF      `
             -DENABLE_QT6=ON       `
             -DENABLE_FFMPEG=ON    `
             -DENABLE_MINIAUDIO=ON `
@@ -176,7 +176,6 @@ jobs:
       shell: pwsh
       run: |
         cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component core
-        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component wingui
         cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component qt6gui
         Rename-Item -Path "install" -NewName "installer"
 

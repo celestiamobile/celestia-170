@@ -55,8 +55,7 @@ Name: "{app}\warp"
 Name: "{app}\help"
 
 [Files]
-Source: "celestia-win.exe"; DestDir: "{app}"; DestName: "celestia.exe"; Flags: ignoreversion
-Source: "celestia-qt6.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "celestia-qt6.exe"; DestDir: "{app}"; DestName: "celestia.exe"; Flags: ignoreversion
 Source: "start.cel";    DestDir: "{app}"; Flags: ignoreversion
 Source: "celestia.cfg"; DestDir: "{app}"; Flags: ignoreversion
 Source: "demo.cel";     DestDir: "{app}"; Flags: ignoreversion
@@ -113,17 +112,21 @@ Source: "help\*";            DestDir: "{app}/help"; Flags: ignoreversion recurse
 [InstallDelete]
 Type: files; Name: "{app}\extras\minormoons.ssc";
 Type: files; Name: "{app}\extras\numberedmoons.ssc";
+; Remove leftover executables from previous installs which shipped
+; separate win32 and Qt6 frontends (win32 was "celestia.exe", now
+; replaced in-place; Qt6 was "celestia-qt6.exe", no longer used
+; since it is now installed as "celestia.exe").
+Type: files; Name: "{app}\celestia-win.exe";
+Type: files; Name: "{app}\celestia-qt6.exe";
 
 [INI]
 Filename: "{app}\celestia.url"; Section: "InternetShortcut"; Key: "URL"; String: "https://celestiaproject.space/"
 
 [Icons]
 Name: "{group}\Celestia";            Filename: "{app}\celestia.exe"; WorkingDir: "{app}"
-Name: "{group}\Celestia (Qt6)";      Filename: "{app}\celestia-qt6.exe"; WorkingDir: "{app}"
 Name: "{group}\README";              Filename: "{app}\README.txt"
 Name: "{group}\Celestia on the Web"; Filename: "{app}\celestia.url"
 Name: "{userdesktop}\Celestia";      Filename: "{app}\celestia.exe"; WorkingDir: "{app}"; MinVersion: 4,4; Tasks: desktopicon
-Name: "{userdesktop}\Celestia (Qt6)"; Filename: "{app}\celestia-qt6.exe"; WorkingDir: "{app}"; MinVersion: 4,4; Tasks: desktopicon
 
 [Registry]
 ; The Software\Shatters.net key is created by the Celestia program, so it needs
