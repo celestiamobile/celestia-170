@@ -118,6 +118,10 @@ Type: files; Name: "{app}\extras\numberedmoons.ssc";
 ; since it is now installed as "celestia.exe").
 Type: files; Name: "{app}\celestia-win.exe";
 Type: files; Name: "{app}\celestia-qt6.exe";
+; Remove leftover "(Qt6)" shortcuts from previous installs; there is
+; now only a single "Celestia" shortcut.
+Type: files; Name: "{group}\Celestia (Qt6).lnk";
+Type: files; Name: "{userdesktop}\Celestia (Qt6).lnk";
 
 [INI]
 Filename: "{app}\celestia.url"; Section: "InternetShortcut"; Key: "URL"; String: "https://celestiaproject.space/"
