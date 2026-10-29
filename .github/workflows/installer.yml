@@ -30,17 +30,17 @@ jobs:
 
     steps:
     - name: Checkout installer repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Checkout Celestia source
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: CelestiaProject/Celestia
         path: 'celestia'
         submodules: true
 
     - name: Checkout CelestiaContent
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: CelestiaProject/CelestiaContent
         path: 'content'
@@ -48,7 +48,7 @@ jobs:
     - name: Update vcpkg
       shell: pwsh
       run: |
-        $vcpkgCommit = 'b8b8df2201ad8509b81a830fe0957bcb98e06c27'
+        $vcpkgCommit = '5363acb796e576328288fae60c25304e227e9839'
         pushd "$env:VCPKG_INSTALLATION_ROOT"
         git fetch origin $vcpkgCommit
         git reset --hard $vcpkgCommit
@@ -154,8 +154,6 @@ jobs:
             -DENABLE_TOOLS=ON     `
             -DENABLE_TESTS=ON     `
             -DENABLE_SDL=OFF      `
-            -DENABLE_QT5=OFF      `
-            -DENABLE_WIN=OFF      `
             -DENABLE_QT6=ON       `
             -DENABLE_FFMPEG=ON    `
             -DENABLE_MINIAUDIO=ON `
@@ -242,7 +240,7 @@ jobs:
                     -NewName "CelestiaInstaller-${{matrix.platform}}.exe"
 
     - name: Upload installer
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       if: success()
       with:
         name: celestia-installer-${{matrix.platform}}
@@ -261,7 +259,7 @@ jobs:
 
     steps:
     - name: Download all installer artifacts
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         path: artifacts
 
